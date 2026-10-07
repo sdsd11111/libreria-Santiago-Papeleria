@@ -38,12 +38,27 @@ export const pool = new Proxy({} as mysql.Pool, {
   }
 });
 
+// Reintento automático si la DB falla por cold-start (hosting compartido)
+async function conReintento<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err: any) {
+    const reintentable = err?.code === "ETIMEDOUT" || err?.code === "ECONNREFUSED" || err?.fatal;
+    if (!reintentable) throw err;
+    console.warn("[DB] Conexión fallida, reintentando en 1.5s...", err?.code);
+    await new Promise((r) => setTimeout(r, 1500));
+    // Forzar nuevo pool en caso de conexión muerta
+    if (err?.fatal) g._pool = undefined;
+    return await fn();
+  }
+}
+
 export async function q<T = any>(sql: string, params: any[] = []): Promise<T[]> {
-  const [rows] = await pool.query(sql, params);
+  const [rows] = await conReintento(() => pool.query(sql, params));
   return rows as T[];
 }
 
 export async function exec(sql: string, params: any[] = []): Promise<ResultSetHeader> {
-  const [r] = await pool.query(sql, params);
+  const [r] = await conReintento(() => pool.query(sql, params));
   return r as ResultSetHeader;
 }

@@ -12,7 +12,7 @@ export const inngest = new Inngest({
 export const procesarChat = inngest.createFunction(
   {
     id: "procesar-chat",
-    debounce: { key: "event.data.conversacionId", period: "5s", timeout: "20s" },
+    debounce: { key: "event.data.conversacionId", period: "10s", timeout: "30s" },
     concurrency: { key: "event.data.conversacionId", limit: 1 },
     retries: 1,
   },

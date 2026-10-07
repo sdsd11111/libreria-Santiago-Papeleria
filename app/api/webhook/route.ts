@@ -86,12 +86,13 @@ export async function POST(req: Request) {
       await enviarTexto(jid, aviso);
       await exec("INSERT INTO bot_mensajes (conversacion_id, rol, texto) VALUES (?, 'bot', ?)", [r.conversacionId, aviso]);
     } else {
-      // Siempre procesamos directo en el mismo request (sin Inngest) para máxima velocidad
-      try {
+      if (!process.env.INNGEST_SIGNING_KEY && !process.env.INNGEST_EVENT_KEY) {
+        // Modo local sin Inngest: procesar directo
         const { procesarConversacion } = await import("@/lib/bot");
-        await procesarConversacion(r.conversacionId);
-      } catch (err) {
-        console.error("[Webhook] Error procesando bot:", err);
+        procesarConversacion(r.conversacionId).catch((err) => console.error("[Bot directo]", err));
+      } else {
+        // Producción: encolar en Inngest (maneja reintentos y concurrencia)
+        await inngest.send({ name: "chat/mensaje", data: { conversacionId: r.conversacionId } });
       }
     }
   }
