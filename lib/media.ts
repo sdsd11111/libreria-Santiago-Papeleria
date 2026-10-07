@@ -1,8 +1,8 @@
 // Extractor multimodal para procesar imágenes, PDFs y audios enviados por WhatsApp
 
 const MODELOS_VISION = [
-  "gemini-2.5-flash-preview-05-20",
-  "gemini-2.0-flash",
+  "gemini-2.5-flash",
+  "gemini-3.8-flash",
   "gemini-flash-lite-latest",
 ];
 

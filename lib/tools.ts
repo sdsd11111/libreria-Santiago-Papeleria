@@ -302,7 +302,8 @@ export async function ejecutar(nombre: string, a: any, ctx: Ctx): Promise<any> {
       // Obtener JID del contacto para enviar
       const [conv] = await q<any>("SELECT c.telefono AS jid FROM bot_contactos c JOIN bot_conversaciones cv ON cv.contacto_id = c.id WHERE cv.id=?", [ctx.convId]);
       if (conv?.jid) {
-        await enviarDocumento(conv.jid, pdfUrl, `Cotizacion-${numero}.pdf`, `📄 Aquí está su cotización ${numero} de Santiago Papelería`);
+        // Enviar el buffer base64 directamente — más confiable que URL con Evolution API
+        await enviarDocumento(conv.jid, pdfBuffer, `Cotizacion-${numero}.pdf`, `📄 Aquí está su cotización ${numero} de Santiago Papelería`);
       }
 
       const totalItems = items.reduce((a: number, i: any) => a + i.cantidad * i.precioUnitario, 0);
