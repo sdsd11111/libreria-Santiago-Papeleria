@@ -11,10 +11,12 @@
     "inngest": "npx inngest-cli@latest dev -u http://localhost:3000/api/inngest"
   },
   "dependencies": {
+    "@types/pdfkit": "^0.17.6",
     "dotenv": "^16.4.5",
     "inngest": "^3.40.0",
     "mysql2": "^3.11.0",
     "next": "^15.1.0",
+    "pdfkit": "^0.20.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "xlsx": "^0.18.5"

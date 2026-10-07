@@ -12,11 +12,26 @@ type Msg = { id: number; rol: "cliente" | "bot" | "agente"; texto: string; cread
 type Traza = { id: number; tools_llamadas: any; bloqueada: number; latencia_ms: number; tokens: number; creado_en: string };
 type Detalle = { conv: any; mensajes: Msg[]; trazas: Traza[] };
 type Filtro = "todos" | "espera" | "bot" | "asesor";
-type Vista = "chat" | "dashboard" | "leads" | "inventario";
+type Vista = "chat" | "dashboard" | "leads" | "inventario" | "imagenes";
 type Lead = { id: number; telefono: string; nombre: string | null; datos: any; creado_en: string; empresa: string | null; intencion: string | null; estado: string | null; bot_activo: number | null; ultimo_msg_en: string | null };
 type Producto = {
   id: number; codigo: string | null; categoria: string; subcategoria: string | null;
   nombre: string; precio: number; precio_iva: number; unidad: string; stock: number; activo: number;
+};
+type CategoriaImg = {
+  id: number;
+  categoria: string;
+  url_imagen: string | null;
+  descripcion: string | null;
+  total_productos: number;
+  galeria?: {
+    id: number;
+    url: string;
+    etiquetas?: string;
+    producto_id?: number | null;
+    producto_nombre?: string | null;
+    producto_precio?: number | null;
+  }[];
 };
 type Metricas = {
   stats: { total_conversaciones: number; con_bot: number; escaladas: number; con_humano: number; hoy: number; leads: number; esperando: number };
@@ -701,6 +716,483 @@ function InventarioView() {
   );
 }
 
+/* ─── Componente Imágenes por Categoría ─────────────── */
+function ImagenesCategorias() {
+  const [cats, setCats] = useState<CategoriaImg[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [subiendo, setSubiendo] = useState<string | null>(null);
+  const [progreso, setProgreso] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ tipo: 'ok' | 'err'; texto: string } | null>(null);
+  const [catGaleriaModal, setCatGaleriaModal] = useState<CategoriaImg | null>(null);
+  
+  // Estado para edición de etiquetas de una foto específica en el modal
+  const [editandoFotoId, setEditandoFotoId] = useState<number | null>(null);
+  const [inputEtiquetas, setInputEtiquetas] = useState<string>("");
+  const [prodsCategoria, setProdsCategoria] = useState<{ id: number; nombre: string; precio: number }[]>([]);
+  const [productoSeleccionado, setProductoSeleccionado] = useState<number | null>(null);
+  const [guardandoEtiqueta, setGuardandoEtiqueta] = useState(false);
+
+  const cargar = useCallback(async () => {
+    setCargando(true);
+    try {
+      const r = await fetch('/api/crm/categorias');
+      if (r.ok) {
+        const data = await r.json();
+        const lista = data.categorias || [];
+        setCats(lista);
+        if (catGaleriaModal) {
+          const updated = lista.find((c: CategoriaImg) => c.categoria === catGaleriaModal.categoria);
+          if (updated) setCatGaleriaModal(updated);
+        }
+      }
+    } finally {
+      setCargando(false);
+    }
+  }, [catGaleriaModal]);
+
+  useEffect(() => { cargar(); }, []);
+
+  // Cargar productos de la categoría actual cuando se abre el modal para sugerir en el selector
+  useEffect(() => {
+    if (catGaleriaModal?.categoria) {
+      fetch(`/api/crm/productos?categoria=${encodeURIComponent(catGaleriaModal.categoria)}&limit=100`)
+        .then(r => r.json())
+        .then(data => {
+          setProdsCategoria((data.productos || []).map((p: any) => ({
+            id: p.id,
+            nombre: p.nombre,
+            precio: p.precio,
+          })));
+        })
+        .catch(() => {});
+    } else {
+      setProdsCategoria([]);
+    }
+  }, [catGaleriaModal?.categoria]);
+
+  async function subirImagenes(categoria: string, files: FileList | File[]) {
+    if (!files || files.length === 0) return;
+    setSubiendo(categoria);
+    setMsg(null);
+    setProgreso(`Subiendo ${files.length} imagen(es)...`);
+    try {
+      const fd = new FormData();
+      for (let i = 0; i < files.length; i++) {
+        fd.append('imagenes', files[i]);
+      }
+      fd.append('categoria', categoria);
+
+      const r = await fetch('/api/crm/categorias', { method: 'POST', body: fd });
+      const j = await r.json();
+      if (r.ok) {
+        setMsg({ tipo: 'ok', texto: `✅ ${j.total || files.length} imagen(es) subida(s) para ${categoria}` });
+        cargar();
+      } else {
+        setMsg({ tipo: 'err', texto: `❌ ${j.error || 'Error al subir'}` });
+      }
+    } catch (e: any) {
+      setMsg({ tipo: 'err', texto: `❌ ${e.message}` });
+    } finally {
+      setSubiendo(null);
+      setProgreso(null);
+    }
+  }
+
+  async function eliminarDeGaleria(categoria: string, imagenId: number) {
+    if (!confirm('¿Eliminar esta imagen de la categoría?')) return;
+    try {
+      const r = await fetch('/api/crm/categorias', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ categoria, imagenId }),
+      });
+      if (r.ok) cargar();
+    } catch (e: any) {
+      alert('Error al eliminar: ' + e.message);
+    }
+  }
+
+  async function fijarComoPrincipal(categoria: string, url_imagen: string) {
+    try {
+      const r = await fetch('/api/crm/categorias', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ categoria, url_imagen }),
+      });
+      if (r.ok) {
+        setMsg({ tipo: 'ok', texto: `🌟 Imagen principal actualizada para ${categoria}` });
+        cargar();
+      }
+    } catch (e: any) {
+      alert('Error al fijar imagen principal: ' + e.message);
+    }
+  }
+
+  async function quitarImagenPrincipal(categoria: string) {
+    if (!confirm(`¿Quitar la imagen principal de ${categoria}?`)) return;
+    await fetch('/api/crm/categorias', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ categoria, esPrincipal: true }),
+    });
+    cargar();
+  }
+
+  async function guardarEtiquetasFoto(imagenId: number) {
+    setGuardandoEtiqueta(true);
+    try {
+      const r = await fetch('/api/crm/categorias', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accion: 'actualizar_etiquetas',
+          imagenId,
+          etiquetas: inputEtiquetas,
+          producto_id: productoSeleccionado,
+        }),
+      });
+      if (r.ok) {
+        setEditandoFotoId(null);
+        setInputEtiquetas("");
+        setProductoSeleccionado(null);
+        cargar();
+      } else {
+        alert('Error al guardar etiquetas');
+      }
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setGuardandoEtiqueta(false);
+    }
+  }
+
+  const conImg = cats.filter(c => c.url_imagen || (c.galeria && c.galeria.length > 0)).length;
+  const sinImg = cats.length - conImg;
+  const totalImagenesSubidas = cats.reduce((acc, c) => acc + (c.galeria ? c.galeria.length : (c.url_imagen ? 1 : 0)), 0);
+
+  return (
+    <div className="dash-glass-root">
+      <div className="dash-hero-header">
+        <div>
+          <span className="dash-chip">🖼️ Imágenes y Reconocimiento Visual</span>
+          <h2 className="dash-main-title">Catálogo Visual & Etiquetas</h2>
+          <p className="dash-subtitle">
+            Administra imágenes y etiqueta productos específicos de la BD para que el bot de WhatsApp envíe la foto exacta cuando un cliente pregunte por un artículo.
+          </p>
+        </div>
+        <div className="dash-quick-pills">
+          <div className="quick-pill"><span className="qp-val" style={{ color: '#10b981' }}>{conImg}</span><span>con imagen</span></div>
+          <div className="quick-pill"><span className="qp-val" style={{ color: '#f59e0b' }}>{sinImg}</span><span>sin imagen</span></div>
+          <div className="quick-pill"><span className="qp-val" style={{ color: '#3b82f6' }}>{totalImagenesSubidas}</span><span>total fotos</span></div>
+        </div>
+      </div>
+
+      {msg && (
+        <div style={{ margin: '0 0 16px', padding: '12px 18px', borderRadius: 12, background: msg.tipo === 'ok' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', color: msg.tipo === 'ok' ? '#047857' : '#b91c1c', fontWeight: 600, fontSize: 14 }}>
+          {msg.texto}
+        </div>
+      )}
+
+      {progreso && (
+        <div style={{ margin: '0 0 16px', padding: '10px 16px', borderRadius: 10, background: '#eff6ff', color: '#1d4ed8', fontWeight: 500, fontSize: 13 }}>
+          ⏳ {progreso}
+        </div>
+      )}
+
+      {cargando ? (
+        <div className="dashboard-loading">Cargando categorías…</div>
+      ) : (
+        <div className="cat-img-grid">
+          {cats.map(cat => {
+            const fotos = cat.galeria || [];
+            const cantFotos = fotos.length > 0 ? fotos.length : (cat.url_imagen ? 1 : 0);
+            return (
+              <div key={cat.categoria} className={`cat-img-card glass ${cat.url_imagen ? 'tiene-img' : ''}`}>
+                <div className="cat-img-preview" onClick={() => setCatGaleriaModal(cat)} style={{ cursor: 'pointer' }}>
+                  {cat.url_imagen ? (
+                    <img src={cat.url_imagen} alt={cat.categoria} className="cat-img-thumb" />
+                  ) : (
+                    <div className="cat-img-placeholder">
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                      <span>Sin imagen</span>
+                    </div>
+                  )}
+                  {cantFotos > 1 && (
+                    <span className="cat-badge-galeria">+{cantFotos} fotos</span>
+                  )}
+                </div>
+
+                <div className="cat-img-info">
+                  <h4 className="cat-img-nombre">{cat.categoria}</h4>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span className="cat-img-count">{cat.total_productos} productos</span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCatGaleriaModal(cat);
+                      }}
+                      style={{
+                        background: '#eff6ff',
+                        border: '1px solid #bfdbfe',
+                        borderRadius: 6,
+                        color: '#1d4ed8',
+                        fontSize: 12,
+                        cursor: 'pointer',
+                        padding: '3px 8px',
+                        fontWeight: 600,
+                      }}>
+                      Ver fotos ({cantFotos})
+                    </button>
+                  </div>
+                </div>
+
+                <div className="cat-img-acciones">
+                  <label className={`btn-upload ${subiendo === cat.categoria ? 'cargando' : ''}`}>
+                    {subiendo === cat.categoria ? 'Subiendo…' : '⬆️ Subir fotos'}
+                    <input
+                      type="file"
+                      accept="image/webp,image/png,image/jpeg,image/jpg"
+                      multiple
+                      style={{ display: 'none' }}
+                      disabled={subiendo !== null}
+                      onChange={e => {
+                        const files = e.target.files;
+                        if (files && files.length > 0) subirImagenes(cat.categoria, files);
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
+                  {cat.url_imagen && (
+                    <button className="btn-quitar-img" onClick={() => quitarImagenPrincipal(cat.categoria)} title="Quitar imagen principal">✕</button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Modal de galería y etiquetado con navegación entre categorías */}
+      {catGaleriaModal && (
+        <div className="modal-backdrop" onClick={() => { setCatGaleriaModal(null); setEditandoFotoId(null); }}>
+          <div className="modal-content glass" onClick={e => e.stopPropagation()} style={{ maxWidth: 760, width: '95%', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            
+            {/* Header con selector directo de todas las categorías */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, borderBottom: '1px solid #e2e8f0', paddingBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#64748b' }}>Categoría:</span>
+                <select
+                  value={catGaleriaModal.categoria}
+                  onChange={e => {
+                    const sel = cats.find(c => c.categoria === e.target.value);
+                    if (sel) {
+                      setCatGaleriaModal(sel);
+                      setEditandoFotoId(null);
+                    }
+                  }}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: 8,
+                    border: '1px solid #cbd5e1',
+                    fontWeight: 700,
+                    fontSize: 14,
+                    color: '#0f172a',
+                    background: '#ffffff',
+                    cursor: 'pointer'
+                  }}>
+                  {cats.map(c => (
+                    <option key={c.categoria} value={c.categoria}>
+                      {c.categoria} ({c.galeria?.length || (c.url_imagen ? 1 : 0)} fotos)
+                    </option>
+                  ))}
+                </select>
+                <span style={{ fontSize: 12, color: '#64748b' }}>
+                  • {catGaleriaModal.total_productos} productos en inventario
+                </span>
+              </div>
+              <button
+                onClick={() => { setCatGaleriaModal(null); setEditandoFotoId(null); }}
+                style={{ background: '#f1f5f9', border: 'none', borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                ✕ Cerrar
+              </button>
+            </div>
+
+            {/* Barra de acción: subir más fotos a esta categoría */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, background: '#f8fafc', padding: '10px 14px', borderRadius: 10 }}>
+              <span style={{ fontSize: 12.5, color: '#475569' }}>
+                💡 <b>Tip de reconocimiento:</b> Asigna etiquetas (ej. <i>"bic cristal azul", "maped escolar"</i>) a cada foto para que el bot la envíe cuando un cliente pregunte por ese producto específico.
+              </span>
+              <label className="btn-upload" style={{ display: 'inline-flex', padding: '6px 14px', fontSize: 12, whiteSpace: 'nowrap' }}>
+                ⬆️ Subir más fotos
+                <input
+                  type="file"
+                  accept="image/webp,image/png,image/jpeg,image/jpg"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={e => {
+                    const files = e.target.files;
+                    if (files && files.length > 0) subirImagenes(catGaleriaModal.categoria, files);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+            </div>
+
+            {/* Grid de fotos de la categoría */}
+            <div style={{ flex: 1, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 14, paddingRight: 4 }}>
+              {(catGaleriaModal.galeria && catGaleriaModal.galeria.length > 0) ? (
+                catGaleriaModal.galeria.map(item => {
+                  const esPrincipal = catGaleriaModal.url_imagen === item.url;
+                  const estaEditando = editandoFotoId === item.id;
+
+                  return (
+                    <div key={item.id} style={{
+                      position: 'relative',
+                      borderRadius: 12,
+                      overflow: 'hidden',
+                      border: esPrincipal ? '2px solid #2563eb' : '1px solid #e2e8f0',
+                      background: '#ffffff',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                      display: 'flex',
+                      flexDirection: 'column'
+                    }}>
+                      <div style={{ position: 'relative', height: 130, background: '#0f172a' }}>
+                        <img src={item.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                        {esPrincipal && (
+                          <span style={{ position: 'absolute', top: 6, left: 6, background: '#2563eb', color: '#fff', fontSize: 10, padding: '3px 7px', borderRadius: 6, fontWeight: 700 }}>
+                            ⭐ Principal
+                          </span>
+                        )}
+                        <div style={{ position: 'absolute', top: 6, right: 6, display: 'flex', gap: 4 }}>
+                          {!esPrincipal && (
+                            <button
+                              onClick={() => fijarComoPrincipal(catGaleriaModal.categoria, item.url)}
+                              title="Marcar como imagen principal de categoría para WhatsApp"
+                              style={{ background: 'rgba(15,23,42,0.8)', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 11, cursor: 'pointer' }}>
+                              ⭐ Principal
+                            </button>
+                          )}
+                          <button
+                            onClick={() => eliminarDeGaleria(catGaleriaModal.categoria, item.id)}
+                            title="Eliminar foto"
+                            style={{ background: 'rgba(239,68,68,0.85)', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 11, cursor: 'pointer' }}>
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Sección de etiquetas y producto vinculado */}
+                      <div style={{ padding: '10px 12px', flex: 1, display: 'flex', flexDirection: 'column', gap: 6, background: '#fafafa' }}>
+                        {estaEditando ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            <label style={{ fontSize: 11, fontWeight: 600, color: '#475569' }}>
+                              Producto específico de la BD:
+                            </label>
+                            <select
+                              value={productoSeleccionado || ""}
+                              onChange={e => {
+                                const val = e.target.value ? parseInt(e.target.value, 10) : null;
+                                setProductoSeleccionado(val);
+                                const prod = prodsCategoria.find(p => p.id === val);
+                                if (prod && !inputEtiquetas) {
+                                  setInputEtiquetas(prod.nombre.toLowerCase());
+                                }
+                              }}
+                              style={{ width: '100%', padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 11 }}>
+                              <option value="">(Ninguno / General de categoría)</option>
+                              {prodsCategoria.map(p => (
+                                <option key={p.id} value={p.id}>
+                                  {p.nombre.slice(0, 35)} (${p.precio})
+                                </option>
+                              ))}
+                            </select>
+
+                            <label style={{ fontSize: 11, fontWeight: 600, color: '#475569' }}>
+                              Etiquetas clave (separadas por coma):
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="ej. bic, cristal, punta fina, azul"
+                              value={inputEtiquetas}
+                              onChange={e => setInputEtiquetas(e.target.value)}
+                              style={{ width: '100%', padding: '5px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 11 }}
+                            />
+
+                            <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                              <button
+                                disabled={guardandoEtiqueta}
+                                onClick={() => guardarEtiquetasFoto(item.id)}
+                                style={{ flex: 1, background: '#10b981', color: '#fff', border: 'none', padding: '5px 0', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                                {guardandoEtiqueta ? 'Guardando...' : '💾 Guardar'}
+                              </button>
+                              <button
+                                onClick={() => setEditandoFotoId(null)}
+                                style={{ background: '#e2e8f0', color: '#334155', border: 'none', padding: '5px 8px', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}>
+                                Cancelar
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            {item.producto_nombre ? (
+                              <div style={{ fontSize: 11.5, fontWeight: 600, color: '#1e293b', marginBottom: 2 }}>
+                                📦 {item.producto_nombre} <span style={{ color: '#059669' }}>(${item.producto_precio})</span>
+                              </div>
+                            ) : null}
+
+                            <div style={{ fontSize: 11, color: '#64748b', display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                              <span>🏷️ Etiquetas:</span>
+                              {item.etiquetas ? (
+                                item.etiquetas.split(',').map((tag: string, idx: number) => (
+                                  <span key={idx} style={{ background: '#e2e8f0', padding: '1px 6px', borderRadius: 4, fontSize: 10, color: '#1e293b' }}>
+                                    {tag.trim()}
+                                  </span>
+                                ))
+                              ) : (
+                                <span style={{ fontStyle: 'italic', color: '#94a3b8' }}>Sin etiquetas</span>
+                              )}
+                            </div>
+
+                            <button
+                              onClick={() => {
+                                setEditandoFotoId(item.id);
+                                setInputEtiquetas(item.etiquetas || "");
+                                setProductoSeleccionado(item.producto_id || null);
+                              }}
+                              style={{
+                                marginTop: 8,
+                                width: '100%',
+                                background: '#f1f5f9',
+                                border: '1px dashed #cbd5e1',
+                                borderRadius: 6,
+                                padding: '4px 0',
+                                fontSize: 11,
+                                fontWeight: 600,
+                                color: '#2563eb',
+                                cursor: 'pointer'
+                              }}>
+                              ✏️ {item.etiquetas || item.producto_id ? 'Editar etiquetas' : '+ Asignar producto / etiquetas'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <p style={{ gridColumn: '1 / -1', color: '#94a3b8', textAlign: 'center', margin: '30px 0' }}>
+                  No hay fotos en esta categoría aún. Sube fotos arriba.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── CRM Principal ──────────────────────────────────── */
 export default function CRM() {
   const [items, setItems] = useState<Item[]>([]);
@@ -713,9 +1205,7 @@ export default function CRM() {
   const [vista, setVista] = useState<Vista>(() => {
     if (typeof window !== "undefined") {
       const v = new URLSearchParams(window.location.search).get("vista");
-      if (v === "chat" || v === "dashboard" || v === "leads" || v === "inventario") return v;
-      const saved = localStorage.getItem("crm_vista");
-      if (saved === "chat" || saved === "dashboard" || saved === "leads" || saved === "inventario") return saved;
+      if (v === "chat" || v === "dashboard" || v === "leads" || v === "inventario" || v === "imagenes") return v;
     }
     return "dashboard";
   });
@@ -896,6 +1386,10 @@ export default function CRM() {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
               Inventario
             </button>
+            <button className="nav-btn" aria-pressed={vista === "imagenes"} onClick={() => cambiarVista("imagenes")}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+              Catálogo Visual
+            </button>
           </div>
 
           {vista === "chat" && (
@@ -964,6 +1458,7 @@ export default function CRM() {
         {vista === "dashboard" && <Dashboard metricas={metricas} />}
         {vista === "leads" && <Leads leads={leads} />}
         {vista === "inventario" && <InventarioView />}
+        {vista === "imagenes" && <ImagenesCategorias />}
 
         {vista === "chat" && !det && (
           <div className="bienvenida">

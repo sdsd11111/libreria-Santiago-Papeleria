@@ -2,7 +2,7 @@ import { q, exec } from "./db";
 import { generar, textoDe, type Content } from "./gemini";
 import { declaraciones, ejecutar, type Ctx } from "./tools";
 import { ahora, asesoresDisponibles } from "./time";
-import { enviarTexto } from "./evolution";
+import { enviarTexto, enviarImagen } from "./evolution";
 
 const ESCALAR_RE = /\b(asesor|humano|persona real|hablar con alguien|agente|queja|reclam|denuncia|estafa|reembols|devoluci)/i;
 const FALLBACK = "Prefiero confirmarlo con un asesor para no darte un dato incorrecto. Ya te paso con uno 🙏";
@@ -284,6 +284,22 @@ export async function procesarConversacion(convId: number) {
 
   await responder(conv, texto, ids);
   await exec("UPDATE bot_conversaciones SET intentos_fallidos=?, estado=IF(?, estado, 'ATENDIENDO') WHERE id=?", [intentos, motivo ? 1 : 0, convId]);
+
+  // Si la búsqueda devolvió una categoría con imagen configurada en Bunny CDN, enviar la imagen
+  if (!bloqueada && !motivo) {
+    try {
+      const prodLogs = log.filter((l) => l.nombre === "buscar_producto" && l.resultado?.encontrado);
+      const primeraImg = prodLogs
+        .flatMap((l) => l.resultado?.productos || [])
+        .map((p: any) => p.imagen_categoria)
+        .find((img: any) => Boolean(img));
+      if (primeraImg) {
+        await enviarImagen(conv.jid, primeraImg);
+      }
+    } catch (e: any) {
+      console.warn("[Bot Imagen] No se pudo enviar imagen:", e?.message || e);
+    }
+  }
 
   // Guardar intención detectada
   const intencion = etiquetaIntencion(log, !!motivo, bloqueada);

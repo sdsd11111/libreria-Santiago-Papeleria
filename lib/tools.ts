@@ -82,6 +82,32 @@ export const declaraciones = [
       required: ["nombre_cliente", "motivo"],
     },
   },
+  {
+    name: "generar_cotizacion_pdf",
+    description: "Genera una proforma/cotización formal en PDF con membrete corporativo de Santiago Papelería y la envía al WhatsApp del cliente. Úsala cuando el cliente solicita una cotización, presupuesto o lista de materiales y ya identificaste los productos y cantidades.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        nombre_cliente: { type: "STRING", description: "Nombre del cliente o 'Consumidor Final'" },
+        ciudad: { type: "STRING", description: "Ciudad del cliente si se conoce" },
+        items: {
+          type: "ARRAY",
+          description: "Lista de productos cotizados con precios exactos del inventario",
+          items: {
+            type: "OBJECT",
+            properties: {
+              codigo: { type: "STRING", description: "Código del producto si se conoce" },
+              nombre: { type: "STRING", description: "Nombre del producto exacto" },
+              cantidad: { type: "NUMBER", description: "Cantidad solicitada (ej. 1, 2, 5)" },
+              precioUnitario: { type: "NUMBER", description: "Precio unitario en dólares exacto del inventario" },
+            },
+            required: ["nombre", "cantidad", "precioUnitario"],
+          },
+        },
+      },
+      required: ["items"],
+    },
+  },
 ];
 
 function palabras(t: string) {
@@ -141,12 +167,30 @@ export async function ejecutar(nombre: string, a: any, ctx: Ctx): Promise<any> {
       if (!ws.length) return { encontrado: false };
       const p: any[] = [];
       let f = "";
-      if (emp) { f = "AND empresa IN (?, 'ambas')"; p.push(emp); }
-      const cond = ws.map(() => "(nombre LIKE ? OR categoria LIKE ? OR descripcion LIKE ?)").join(" OR ");
+      if (emp) { f = "AND p.empresa IN (?, 'ambas')"; p.push(emp); }
+      const cond = ws.map(() => "(p.nombre LIKE ? OR p.categoria LIKE ? OR p.descripcion LIKE ?)").join(" OR ");
       ws.forEach((w) => p.push(`%${w}%`, `%${w}%`, `%${w}%`));
-      const rows = await q(`SELECT empresa, nombre, descripcion, categoria, precio, stock FROM bot_productos WHERE activo=1 ${f} AND (${cond}) LIMIT 30`, p);
+      const rows = await q<any>(
+        `SELECT p.id AS producto_id, p.empresa, p.nombre, p.descripcion, p.categoria, p.precio, p.stock,
+                c.url_imagen AS cat_imagen,
+                (SELECT g.url_imagen FROM bot_categorias_galeria g
+                 WHERE g.producto_id = p.id
+                    OR (g.categoria = p.categoria AND g.etiquetas IS NOT NULL AND (${ws.map(() => "g.etiquetas LIKE ?").join(" OR ")}))
+                 ORDER BY (g.producto_id = p.id) DESC, g.id DESC LIMIT 1) AS foto_especifica
+         FROM bot_productos p
+         LEFT JOIN bot_categorias_img c ON c.categoria = p.categoria
+         WHERE p.activo=1 ${f} AND (${cond})
+         LIMIT 30`,
+        [...ws.map((w) => `%${w}%`), ...p]
+      );
       const top = puntuar(rows, ws, ["nombre", "categoria", "descripcion"], 5).map((r) => ({
-        nombre: r.nombre, descripcion: r.descripcion, categoria: r.categoria, precio: r.precio, disponible: r.stock > 0,
+        nombre: r.nombre,
+        descripcion: r.descripcion,
+        categoria: r.categoria,
+        precio: r.precio,
+        disponible: r.stock > 0,
+        imagen_especifica: r.foto_especifica || null,
+        imagen_categoria: r.foto_especifica || r.cat_imagen || null,
       }));
       return top.length ? { encontrado: true, productos: top } : { encontrado: false };
     }
@@ -209,6 +253,66 @@ export async function ejecutar(nombre: string, a: any, ctx: Ctx): Promise<any> {
         console.warn("[notificar_asesor] Error enviando a asesor:", err?.message);
         return { ok: false, error: err?.message };
       }
+    }
+
+    if (nombre === "generar_cotizacion_pdf") {
+      const { generarPdfCotizacion } = await import("./cotizacion-pdf");
+      const { enviarDocumento } = await import("./evolution");
+
+      const items = (a?.items ?? []).map((it: any) => ({
+        codigo: it.codigo || undefined,
+        nombre: String(it.nombre ?? ""),
+        cantidad: Number(it.cantidad ?? 1),
+        precioUnitario: Number(it.precioUnitario ?? 0),
+      })).filter((it: any) => it.nombre && it.precioUnitario > 0);
+
+      if (!items.length) return { ok: false, error: "No hay items válidos para la cotización" };
+
+      const numero = `COT-${Date.now().toString().slice(-6)}`;
+      const pdfBuffer = await generarPdfCotizacion({
+        numero,
+        clienteNombre: String(a?.nombre_cliente ?? "Consumidor Final"),
+        clienteTelefono: ctx.convId ? undefined : undefined,
+        clienteCiudad: String(a?.ciudad ?? ""),
+        items,
+      });
+
+      // Subir PDF a Bunny CDN
+      const { BUNNY_STORAGE_ZONE, BUNNY_STORAGE_API_KEY, BUNNY_STORAGE_HOST, BUNNY_PULLZONE_URL } = process.env;
+      if (!BUNNY_STORAGE_API_KEY || !BUNNY_STORAGE_ZONE) {
+        return { ok: false, error: "Bunny CDN no configurado para PDFs" };
+      }
+
+      const fileName = `cotizaciones/${numero}.pdf`;
+      const uploadRes = await fetch(
+        `https://${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${fileName}`,
+        {
+          method: "PUT",
+          headers: { AccessKey: BUNNY_STORAGE_API_KEY, "Content-Type": "application/pdf" },
+          body: new Uint8Array(pdfBuffer),
+        }
+      );
+
+      if (!uploadRes.ok) {
+        return { ok: false, error: `Error subiendo PDF: ${await uploadRes.text()}` };
+      }
+
+      const pdfUrl = `${BUNNY_PULLZONE_URL}/${fileName}`;
+
+      // Obtener JID del contacto para enviar
+      const [conv] = await q<any>("SELECT c.jid FROM bot_contactos c JOIN bot_conversaciones cv ON cv.contacto_id = c.id WHERE cv.id=?", [ctx.convId]);
+      if (conv?.jid) {
+        await enviarDocumento(conv.jid, pdfUrl, `Cotizacion-${numero}.pdf`, `📄 Aquí está tu cotización ${numero} de Santiago Papelería`);
+      }
+
+      const totalItems = items.reduce((a: number, i: any) => a + i.cantidad * i.precioUnitario, 0);
+      return {
+        ok: true,
+        numero,
+        total_sin_iva: totalItems.toFixed(2),
+        total_con_iva: (totalItems * 1.15).toFixed(2),
+        pdf_url: pdfUrl,
+      };
     }
 
     return { error: "herramienta desconocida" };
