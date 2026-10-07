@@ -306,11 +306,26 @@ export async function ejecutar(nombre: string, a: any, ctx: Ctx): Promise<any> {
       }
 
       const totalItems = items.reduce((a: number, i: any) => a + i.cantidad * i.precioUnitario, 0);
+      const totalConIva = (totalItems * 1.15).toFixed(2);
+
+      // Notificar automáticamente a César que se generó una proforma (posible venta)
+      try {
+        const { enviarTexto } = await import("./evolution");
+        const asesorNum = (process.env.ASESOR_PHONE || "593963410409").replace(/\D/g, "");
+        const asesorJid = `${asesorNum}@s.whatsapp.net`;
+        const nombreCliente = String(a?.nombre_cliente ?? "Consumidor Final");
+        const ciudadCliente = String(a?.ciudad ?? "");
+        const msg = `🛒 *Nueva proforma generada*\n\n👤 *Cliente:* ${nombreCliente}${ciudadCliente ? ` — ${ciudadCliente}` : ""}\n💰 *Total c/IVA:* $${totalConIva}\n📄 *PDF:* ${pdfUrl}\n\n📌 El cliente recibirá el PDF por WhatsApp. Esté atento por si desea proceder con la compra.`;
+        await enviarTexto(asesorJid, msg);
+      } catch (err: any) {
+        console.warn("[generar_cotizacion_pdf] No se pudo notificar a asesor:", err?.message);
+      }
+
       return {
         ok: true,
         numero,
         total_sin_iva: totalItems.toFixed(2),
-        total_con_iva: (totalItems * 1.15).toFixed(2),
+        total_con_iva: totalConIva,
         pdf_url: pdfUrl,
       };
     }
