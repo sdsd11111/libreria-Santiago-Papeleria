@@ -13,9 +13,12 @@ function crear() {
     waitForConnections: true,
     connectionLimit: 3, // hosting compartido: pocas conexiones
     maxIdle: 1,
-    idleTimeout: 10000,
+    idleTimeout: 30000,
+    connectTimeout: 8000, // timeout de conexión inicial
     charset: "utf8mb4",
     timezone: "Z",
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 5000,
   });
   // Todo en UTC, el CRM formatea a hora local.
   (p as any).pool.on("connection", (c: any) => c.query("SET time_zone = '+00:00'"));

@@ -5,7 +5,7 @@ import { enviarTexto } from "@/lib/evolution";
 import { exec } from "@/lib/db";
 import { extraerTextoDeMedia } from "@/lib/media";
 
-export const maxDuration = 45;
+export const maxDuration = 60;
 
 // Evolution -> POST /api/webhook?secret=...   (evento MESSAGES_UPSERT)
 export async function POST(req: Request) {
@@ -86,14 +86,12 @@ export async function POST(req: Request) {
       await enviarTexto(jid, aviso);
       await exec("INSERT INTO bot_mensajes (conversacion_id, rol, texto) VALUES (?, 'bot', ?)", [r.conversacionId, aviso]);
     } else {
-      if (!process.env.INNGEST_SIGNING_KEY && !process.env.INNGEST_EVENT_KEY) {
-        // Modo directo local / MVP: procesar inmediatamente
+      // Siempre procesamos directo en el mismo request (sin Inngest) para máxima velocidad
+      try {
         const { procesarConversacion } = await import("@/lib/bot");
-        setTimeout(() => {
-          procesarConversacion(r.conversacionId).catch((err) => console.error("Error procesando bot directo:", err));
-        }, 1000);
-      } else {
-        await inngest.send({ name: "chat/mensaje", data: { conversacionId: r.conversacionId } });
+        await procesarConversacion(r.conversacionId);
+      } catch (err) {
+        console.error("[Webhook] Error procesando bot:", err);
       }
     }
   }
