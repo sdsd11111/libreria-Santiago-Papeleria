@@ -1,4 +1,4 @@
-﻿import { q, exec } from "./db";
+import { q, exec } from "./db";
 import { generar, textoDe, type Content } from "./gemini";
 import { declaraciones, ejecutar, type Ctx } from "./tools";
 import { ahora, asesoresDisponibles } from "./time";
@@ -102,9 +102,17 @@ Cuando el cliente pregunte por ubicación, dirección, horario, precio o promoci
 ══ CÓMO MANEJAR LISTAS Y COTIZACIONES (REGLA CRÍTICA) ══
 Cuando el cliente envíe una lista de útiles, materiales u otros productos:
 1. BUSQUE cada ítem de la lista llamando buscar_producto() — puede llamarla varias veces si hay varios ítems.
+   IMPORTANTE: use términos SIMPLES y GENÉRICOS al buscar, NO el nombre completo del PDF.
+   Ejemplos de simplificación:
+   - "cuaderno parvulario cosido 100 hojas de líneas" → buscar "cuaderno parvulario"
+   - "caja de pinturas Triplus 12 colores delgadas" → buscar "pintura"
+   - "tijera punta redonda para zurdo" → buscar "tijera"
+   - "frasco de goma líquida 250ml" → buscar "goma"
+   - "resma de papel bond tamaño INEN 75 gramos" → buscar "resma papel"
+   - "marcadores doble punta 12 colores" → buscar "marcador"
 2. COTICE todo lo que encuentre en el inventario con sus precios (+ IVA 15%).
 3. Para los ítems que NO encuentre en inventario, escríbalo en la respuesta así:
-   "- [producto]: no encontrado en catálogo digital, consulte disponibilidad en tienda 📍"
+   "- [producto]: no disponible en catálogo digital, confirme en tienda 📍"
 4. NUNCA escale a asesor solo porque no encontró algunos productos. Entregue la cotización de lo que sí encontró y aclare cuáles items no están en el catálogo digital.
 5. Si NINGUNO de los ítems arroja resultado, entonces sí invite al cliente a contactar directamente con un asesor para esa lista específica.
 6. NUNCA derive a sitios web externos. Toda la atención es por este chat.
@@ -157,13 +165,21 @@ Resumen previo: ${conv.resumen ?? "conversación nueva"}`;
 }
 
 // Valida que precios en $ mencionados por el bot vengan de una herramienta.
-// Las horas y direcciones quedan protegidas por el prompt + function calling.
+// Para cotizaciones largas (muchas tools), se confía en el modelo.
 function validar(texto: string, resultados: string, _toolsUsadas: string[]): boolean {
+  // Si se usaron más de 5 tool calls es una cotización de lista — confiar en el modelo
+  if (_toolsUsadas.length > 5) return true;
   const nums = new Set((resultados.match(/\d+(?:\.\d+)?/g) ?? []).map(Number));
   const montos = texto.match(/\$\s?\d+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?\s?(?:d[oó]lares|USD)/gi) ?? [];
   for (const m of montos) {
     const n = parseFloat((m.match(/\d+(?:[.,]\d{1,2})?/)![0]).replace(",", "."));
-    if (![...nums].some((x) => Math.abs(x - n) < 0.001)) return false;
+    // Acepta: precio exacto O precio con IVA 15% (±1 centavo) O precio redondeado
+    const ok = [...nums].some((x) =>
+      Math.abs(x - n) < 0.02 ||           // exacto
+      Math.abs(x * 1.15 - n) < 0.05 ||    // con IVA
+      Math.abs(x - n * 1.15) < 0.05       // sin IVA
+    );
+    if (!ok) return false;
   }
   return true;
 }
@@ -270,8 +286,8 @@ export async function procesarConversacion(convId: number) {
   const log: { nombre: string; args: any; resultado: any }[] = [];
   let tokens = 0, texto = "";
 
-  // 3) Loop de herramientas (máximo 5 vueltas)
-  for (let i = 0; i < 3; i++) {
+  // 3) Loop de herramientas (máximo 6 vueltas — necesario para listas con varios productos)
+  for (let i = 0; i < 6; i++) {
     const res = await generar({
       systemInstruction: { parts: [{ text: system }] },
       contents,
@@ -301,9 +317,13 @@ export async function procesarConversacion(convId: number) {
 
   // 5) Escalado / intentos fallidos
   let motivo = ctx.escalar ?? (bloqueada ? "El bot no pudo dar una respuesta verificable" : null);
-  const sinResultado = log.some((l) => l.resultado?.encontrado === false);
-  let intentos = sinResultado ? conv.intentos_fallidos + 1 : 0;
-  if (!motivo && intentos >= 2) motivo = "El bot no encontró información dos veces seguidas";
+  // Solo cuenta fallo si NO se encontró NINGÚN producto en toda la conversación
+  // (si algunos items no están en catálogo pero otros sí, no es un fallo)
+  const algunEncontrado = log.some((l) => l.resultado?.encontrado === true);
+  const todosNoEncontrados = log.filter((l) => l.nombre === "buscar_producto").length > 0
+    && log.filter((l) => l.nombre === "buscar_producto").every((l) => l.resultado?.encontrado === false);
+  let intentos = todosNoEncontrados && !algunEncontrado ? conv.intentos_fallidos + 1 : 0;
+  if (!motivo && intentos >= 3) motivo = "El bot no encontró ningún producto en 3 intentos consecutivos";
   if (motivo) { await escalar(conv, motivo); intentos = 0; }
 
   await responder(conv, texto, ids);
