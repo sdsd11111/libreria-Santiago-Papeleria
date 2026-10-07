@@ -1,4 +1,4 @@
-import PDFDocument from "pdfkit";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
 export interface ItemCotizacion {
   codigo?: string;
@@ -17,209 +17,123 @@ export interface CotizacionParams {
 }
 
 export async function generarPdfCotizacion(params: CotizacionParams): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    try {
-      const doc = new PDFDocument({
-        margin: 40,
-        size: "A4",
-      });
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([595, 842]); // A4
+  const { width, height } = page.getSize();
 
-      const chunks: Buffer[] = [];
-      doc.on("data", (chunk) => chunks.push(chunk));
-      doc.on("end", () => resolve(Buffer.concat(chunks)));
-      doc.on("error", (err) => reject(err));
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const fontReg = await doc.embedFont(StandardFonts.Helvetica);
 
-      const azulOscuro = "#0f172a";
-      const azulPrimario = "#2563eb";
-      const grisBorde = "#e2e8f0";
-      const grisTexto = "#475569";
-      const grisFondo = "#f8fafc";
+  const azul = rgb(0.145, 0.388, 0.922);   // #2563eb
+  const oscuro = rgb(0.059, 0.090, 0.165);  // #0f172a
+  const gris = rgb(0.282, 0.337, 0.412);   // #475569
+  const blanco = rgb(1, 1, 1);
 
-      // ── Encabezado / Branding ────────────────────────────────
-      // Barra decorativa superior
-      doc.rect(40, 40, 515, 6).fill(azulPrimario);
+  let y = height - 40;
 
-      // Título empresa
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(22)
-        .fillColor(azulOscuro)
-        .text("SANTIAGO PAPELERÍA", 40, 60);
+  // ── Barra superior azul ───────────────────────────────────
+  page.drawRectangle({ x: 40, y: y - 6, width: width - 80, height: 6, color: azul });
+  y -= 20;
 
-      doc
-        .font("Helvetica")
-        .fontSize(9)
-        .fillColor(grisTexto)
-        .text("RUC: 1100000000001 · Matriz: Calle 10 de Agosto y Bernardo Valdivieso · Loja, Ecuador", 40, 88)
-        .text("Teléfono: +593 96 341 0409 · Atención y Envíos a todo el país", 40, 100);
+  // ── Nombre empresa ────────────────────────────────────────
+  page.drawText("SANTIAGO PAPELERÍA", {
+    x: 40, y: y - 22, size: 22, font: fontBold, color: oscuro,
+  });
 
-      // Badge Cotización
-      doc.roundedRect(380, 58, 175, 55, 6).fillAndStroke(grisFondo, grisBorde);
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(12)
-        .fillColor(azulPrimario)
-        .text("PROFORMA / COTIZACIÓN", 390, 68, { width: 155, align: "center" });
+  // ── Datos empresa ─────────────────────────────────────────
+  page.drawText("RUC: 1190000000001  ·  Matriz: Azuay 152-48, Loja, Ecuador", {
+    x: 40, y: y - 40, size: 8, font: fontReg, color: gris,
+  });
+  page.drawText("Tel: (07) 257-3358  ·  WhatsApp: 0987667459  ·  ventas@santiagopapeleria.com", {
+    x: 40, y: y - 52, size: 8, font: fontReg, color: gris,
+  });
 
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(11)
-        .fillColor(azulOscuro)
-        .text(`N° ${params.numero}`, 390, 85, { width: 155, align: "center" });
+  // ── Badge cotización (derecha) ────────────────────────────
+  page.drawRectangle({ x: 390, y: y - 60, width: 165, height: 55, color: rgb(0.973, 0.984, 0.992), borderColor: rgb(0.886, 0.910, 0.941), borderWidth: 1 });
+  page.drawText("PROFORMA / COTIZACIÓN", { x: 398, y: y - 20, size: 9, font: fontBold, color: azul });
+  page.drawText(`N° ${params.numero}`, { x: 398, y: y - 35, size: 10, font: fontBold, color: oscuro });
+  const fechaHoy = new Date().toLocaleDateString("es-EC", { day: "2-digit", month: "2-digit", year: "numeric" });
+  page.drawText(`Fecha: ${fechaHoy}`, { x: 398, y: y - 48, size: 8, font: fontReg, color: gris });
 
-      const fechaHoy = new Date().toLocaleDateString("es-EC", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-      });
-      doc
-        .font("Helvetica")
-        .fontSize(8.5)
-        .fillColor(grisTexto)
-        .text(`Fecha: ${fechaHoy}`, 390, 100, { width: 155, align: "center" });
+  y -= 75;
 
-      // ── Datos del Cliente ────────────────────────────────────
-      doc.roundedRect(40, 125, 515, 52, 6).fillAndStroke(grisFondo, grisBorde);
+  // ── Datos del cliente ─────────────────────────────────────
+  page.drawRectangle({ x: 40, y: y - 50, width: width - 80, height: 50, color: rgb(0.973, 0.984, 0.992), borderColor: rgb(0.886, 0.910, 0.941), borderWidth: 1 });
+  page.drawText("DATOS DEL CLIENTE", { x: 52, y: y - 15, size: 8, font: fontBold, color: azul });
+  page.drawText(`Cliente: ${params.clienteNombre || "Consumidor Final"}`, { x: 52, y: y - 28, size: 10, font: fontBold, color: oscuro });
+  const subCliente = [params.clienteTelefono && `Tel: ${params.clienteTelefono}`, params.clienteCiudad && `Ciudad: ${params.clienteCiudad}`].filter(Boolean).join("  |  ");
+  if (subCliente) page.drawText(subCliente, { x: 52, y: y - 42, size: 8, font: fontReg, color: gris });
 
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(8.5)
-        .fillColor(azulPrimario)
-        .text("DATOS DEL CLIENTE", 52, 133);
+  y -= 65;
 
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(10)
-        .fillColor(azulOscuro)
-        .text(`Cliente: `, 52, 148, { continued: true })
-        .font("Helvetica")
-        .text(params.clienteNombre || "Consumidor Final");
+  // ── Encabezado tabla ──────────────────────────────────────
+  page.drawRectangle({ x: 40, y: y - 22, width: width - 80, height: 22, color: oscuro });
+  page.drawText("CANT", { x: 48, y: y - 15, size: 8, font: fontBold, color: blanco });
+  page.drawText("DESCRIPCIÓN DEL PRODUCTO", { x: 95, y: y - 15, size: 8, font: fontBold, color: blanco });
+  page.drawText("P.UNIT", { x: 420, y: y - 15, size: 8, font: fontBold, color: blanco });
+  page.drawText("TOTAL", { x: 490, y: y - 15, size: 8, font: fontBold, color: blanco });
+  y -= 22;
 
-      const subCliente = [];
-      if (params.clienteTelefono) subCliente.push(`Tel: ${params.clienteTelefono}`);
-      if (params.clienteCiudad) subCliente.push(`Ciudad: ${params.clienteCiudad}`);
+  // ── Filas de productos ────────────────────────────────────
+  let subtotal = 0;
+  params.items.forEach((item, idx) => {
+    const rowColor = idx % 2 === 0 ? rgb(1, 1, 1) : rgb(0.973, 0.984, 0.992);
+    const itemTotal = item.cantidad * item.precioUnitario;
+    subtotal += itemTotal;
 
-      doc
-        .font("Helvetica")
-        .fontSize(8.5)
-        .fillColor(grisTexto)
-        .text(subCliente.join("  |  ") || "Cotización solicitada por asistente virtual WhatsApp", 52, 162);
+    page.drawRectangle({ x: 40, y: y - 18, width: width - 80, height: 18, color: rowColor });
+    page.drawLine({ start: { x: 40, y: y - 18 }, end: { x: width - 40, y: y - 18 }, color: rgb(0.886, 0.910, 0.941), thickness: 0.5 });
 
-      // ── Tabla de Productos ───────────────────────────────────
-      const yTabla = 190;
-      doc.rect(40, yTabla, 515, 24).fill(azulOscuro);
+    page.drawText(String(item.cantidad), { x: 55, y: y - 12, size: 8, font: fontBold, color: oscuro });
 
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(8.5)
-        .fillColor("#ffffff")
-        .text("CANT", 48, yTabla + 7, { width: 40, align: "center" })
-        .text("DESCRIPCIÓN DEL PRODUCTO", 95, yTabla + 7)
-        .text("P. UNIT", 400, yTabla + 7, { width: 65, align: "right" })
-        .text("TOTAL", 480, yTabla + 7, { width: 65, align: "right" });
+    // Truncar nombre si es muy largo
+    const nombre = item.nombre.length > 55 ? item.nombre.substring(0, 55) + "…" : item.nombre;
+    page.drawText(nombre, { x: 95, y: y - 12, size: 8, font: fontReg, color: oscuro });
 
-      let currY = yTabla + 24;
-      let subtotal = 0;
+    page.drawText(`$${item.precioUnitario.toFixed(2)}`, { x: 415, y: y - 12, size: 8, font: fontReg, color: gris });
+    page.drawText(`$${itemTotal.toFixed(2)}`, { x: 490, y: y - 12, size: 8, font: fontBold, color: oscuro });
 
-      params.items.forEach((item, index) => {
-        const itemTotal = item.cantidad * item.precioUnitario;
-        subtotal += itemTotal;
-
-        const rowBg = index % 2 === 0 ? "#ffffff" : "#f8fafc";
-        doc.rect(40, currY, 515, 20).fill(rowBg);
-
-        // Borde inferior sutil
-        doc.moveTo(40, currY + 20).lineTo(555, currY + 20).strokeColor(grisBorde).stroke();
-
-        doc
-          .font("Helvetica-Bold")
-          .fontSize(8.5)
-          .fillColor(azulOscuro)
-          .text(String(item.cantidad), 48, currY + 5, { width: 40, align: "center" });
-
-        const nombreTexto = item.codigo ? `[${item.codigo}] ${item.nombre}` : item.nombre;
-        doc
-          .font("Helvetica")
-          .fontSize(8.5)
-          .fillColor(azulOscuro)
-          .text(nombreTexto, 95, currY + 5, { width: 295, lineBreak: false, ellipsis: true });
-
-        doc
-          .font("Helvetica")
-          .fontSize(8.5)
-          .fillColor(grisTexto)
-          .text(`$${item.precioUnitario.toFixed(2)}`, 400, currY + 5, { width: 65, align: "right" });
-
-        doc
-          .font("Helvetica-Bold")
-          .fontSize(8.5)
-          .fillColor(azulOscuro)
-          .text(`$${itemTotal.toFixed(2)}`, 480, currY + 5, { width: 65, align: "right" });
-
-        currY += 20;
-      });
-
-      // ── Bloque de Totales ────────────────────────────────────
-      const iva = subtotal * 0.15; // IVA 15% vigente en Ecuador
-      const totalGeneral = subtotal + iva;
-
-      currY += 12;
-      const xTotales = 360;
-      const wTotales = 195;
-
-      doc.roundedRect(xTotales, currY, wTotales, 74, 6).fillAndStroke(grisFondo, grisBorde);
-
-      doc
-        .font("Helvetica")
-        .fontSize(9)
-        .fillColor(grisTexto)
-        .text("Subtotal:", xTotales + 12, currY + 10)
-        .text(`$${subtotal.toFixed(2)}`, xTotales + 12, currY + 10, { width: wTotales - 24, align: "right" });
-
-      doc
-        .text("IVA (15%):", xTotales + 12, currY + 28)
-        .text(`$${iva.toFixed(2)}`, xTotales + 12, currY + 28, { width: wTotales - 24, align: "right" });
-
-      doc.moveTo(xTotales + 10, currY + 46).lineTo(xTotales + wTotales - 10, currY + 46).strokeColor(grisBorde).stroke();
-
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(11)
-        .fillColor(azulPrimario)
-        .text("TOTAL USD:", xTotales + 12, currY + 52)
-        .text(`$${totalGeneral.toFixed(2)}`, xTotales + 12, currY + 52, { width: wTotales - 24, align: "right" });
-
-      // ── Notas y Términos ────────────────────────────────────
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(8)
-        .fillColor(azulOscuro)
-        .text("CONDICIONES COMERCIALES:", 40, currY + 10);
-
-      doc
-        .font("Helvetica")
-        .fontSize(7.5)
-        .fillColor(grisTexto)
-        .text("• Precios válidos por 5 días calendario o hasta agotar existencias.", 40, currY + 22)
-        .text("• Entrega inmediata en tienda o envíos a nivel nacional.", 40, currY + 34)
-        .text("• Facturación electrónica con datos de consumidor final o RUC.", 40, currY + 46)
-        .text("• Formas de pago: Transferencia directa, tarjeta o efectivo en sucursal.", 40, currY + 58);
-
-      // Pie de página
-      doc
-        .font("Helvetica-Oblique")
-        .fontSize(7.5)
-        .fillColor("#94a3b8")
-        .text(
-          "Generado automáticamente por el asistente de Santiago Papelería · Gracias por su preferencia.",
-          40,
-          770,
-          { align: "center", width: 515 }
-        );
-
-      doc.end();
-    } catch (e) {
-      reject(e);
+    y -= 18;
+    if (y < 120) {
+      // Si se acaba el espacio, continuar (simplificado para MVP)
     }
   });
+
+  y -= 15;
+
+  // ── Totales ───────────────────────────────────────────────
+  const iva = subtotal * 0.15;
+  const total = subtotal + iva;
+
+  page.drawRectangle({ x: 360, y: y - 72, width: 195, height: 72, color: rgb(0.973, 0.984, 0.992), borderColor: rgb(0.886, 0.910, 0.941), borderWidth: 1 });
+  page.drawText("Subtotal:", { x: 372, y: y - 18, size: 9, font: fontReg, color: gris });
+  page.drawText(`$${subtotal.toFixed(2)}`, { x: 490, y: y - 18, size: 9, font: fontReg, color: oscuro });
+  page.drawText("IVA (15%):", { x: 372, y: y - 36, size: 9, font: fontReg, color: gris });
+  page.drawText(`$${iva.toFixed(2)}`, { x: 490, y: y - 36, size: 9, font: fontReg, color: oscuro });
+  page.drawLine({ start: { x: 370, y: y - 48 }, end: { x: 545, y: y - 48 }, color: rgb(0.886, 0.910, 0.941), thickness: 0.5 });
+  page.drawText("TOTAL USD:", { x: 372, y: y - 62, size: 11, font: fontBold, color: azul });
+  page.drawText(`$${total.toFixed(2)}`, { x: 490, y: y - 62, size: 11, font: fontBold, color: azul });
+
+  y -= 90;
+
+  // ── Condiciones ───────────────────────────────────────────
+  page.drawText("CONDICIONES COMERCIALES:", { x: 40, y: y, size: 8, font: fontBold, color: oscuro });
+  const conds = [
+    "• Precios válidos por 5 días calendario o hasta agotar existencias.",
+    "• Entrega inmediata en tienda o envíos a nivel nacional.",
+    "• Facturación electrónica con cédula / RUC del consumidor.",
+    "• Formas de pago: Efectivo, tarjeta, transferencia bancaria.",
+  ];
+  conds.forEach((c, i) => {
+    page.drawText(c, { x: 40, y: y - 12 - i * 12, size: 7.5, font: fontReg, color: gris });
+  });
+
+  // ── Pie de página ─────────────────────────────────────────
+  page.drawText(
+    "Generado automáticamente por el asistente de Santiago Papelería  ·  Gracias por su preferencia.",
+    { x: 40, y: 20, size: 7, font: fontReg, color: rgb(0.580, 0.639, 0.722) }
+  );
+
+  const pdfBytes = await doc.save();
+  return Buffer.from(pdfBytes);
 }

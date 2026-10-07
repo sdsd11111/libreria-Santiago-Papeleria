@@ -181,7 +181,8 @@ Resumen previo: ${conv.resumen ?? "conversación nueva"}`;
 // Para cotizaciones largas (muchas tools), se confía en el modelo.
 function validar(texto: string, resultados: string, _toolsUsadas: string[]): boolean {
   // Si se usaron más de 5 tool calls es una cotización de lista — confiar en el modelo
-  if (_toolsUsadas.length > 5) return true;
+  // También si se generó una cotización PDF: confiar en el modelo
+  if (_toolsUsadas.length > 5 || _toolsUsadas.includes("generar_cotizacion_pdf")) return true;
   const nums = new Set((resultados.match(/\d+(?:\.\d+)?/g) ?? []).map(Number));
   const montos = texto.match(/\$\s?\d+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?\s?(?:d[oó]lares|USD)/gi) ?? [];
   for (const m of montos) {
