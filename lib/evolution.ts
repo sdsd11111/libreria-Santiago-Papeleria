@@ -44,9 +44,9 @@ export async function enviarImagen(jid: string, mediaUrl: string, caption?: stri
 export async function enviarDocumento(jid: string, media: string | Buffer, fileName: string, caption?: string) {
   if (jid.startsWith("sim-")) return;
   try {
-    // Si es un Buffer, convertir a data URI base64
+    // Si es un Buffer, convertir a base64 RAW (sin prefijo data URI — Evolution API v2.3.7)
     const mediaStr = Buffer.isBuffer(media)
-      ? `data:application/pdf;base64,${media.toString("base64")}`
+      ? media.toString("base64")
       : media;
 
     const body = JSON.stringify({
