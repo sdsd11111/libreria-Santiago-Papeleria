@@ -21,11 +21,13 @@ export async function GET() {
     WHERE nombre IS NOT NULL OR (datos IS NOT NULL AND datos != 'null' AND datos != '{}')
   `);
 
-  // Proformas generadas (cotizaciones PDF)
+  // Proformas generadas: contar desde bot_trazas donde se llamó generar_cotizacion_pdf
+  // Es la fuente exacta — bot_trazas registra qué herramientas usó el modelo en cada turno
   const [proformas] = await q<any>(`
-    SELECT COUNT(*) AS total FROM bot_conversaciones
-    WHERE intencion = 'Proforma generada'
+    SELECT COUNT(DISTINCT conversacion_id) AS total FROM bot_trazas
+    WHERE tools_llamadas LIKE '%generar_cotizacion_pdf%'
   `);
+
 
   // Paso a ventas: eventos registrados cuando se genera una proforma
   const [pasoVentas] = await q<any>(`
@@ -73,15 +75,36 @@ export async function GET() {
     AND m.rol = 'cliente'
   `);
 
+  // Inyectar "Pasó a ventas" como intención sintética (viene de bot_eventos, no de bot_conversaciones)
+  // para que aparezca en la sección "Qué consultaron los clientes"
+  const pasoVentasN = pasoVentas?.total || 0;
+  const proformasN = proformas?.total || 0;
+
+  // Asegurarnos de que "Proforma generada" SIEMPRE aparezca (aunque esté en 0)
+  const intentcionesFinal = [...intenciones];
+
+  // Agregar "Pasó a ventas" si tiene eventos y no está ya en la lista
+  if (pasoVentasN > 0 && !intentcionesFinal.find((i: any) => i.intencion === 'Pasó a ventas')) {
+    intentcionesFinal.push({ intencion: 'Pasó a ventas', n: pasoVentasN });
+  }
+
+  // "Proforma generada" siempre visible en las cards
+  if (!intentcionesFinal.find((i: any) => i.intencion === 'Proforma generada')) {
+    intentcionesFinal.push({ intencion: 'Proforma generada', n: proformasN });
+  }
+
+  // Reordenar por n desc
+  intentcionesFinal.sort((a: any, b: any) => b.n - a.n);
+
   return NextResponse.json({
     stats: {
       ...stats,
       leads: leads?.total || 0,
       esperando: esperando?.n || 0,
-      proformas: proformas?.total || 0,
-      paso_ventas: pasoVentas?.total || 0,
+      proformas: proformasN,
+      paso_ventas: pasoVentasN,
     },
-    intenciones,
+    intenciones: intentcionesFinal,
     porDia,
     porEmpresa,
   });

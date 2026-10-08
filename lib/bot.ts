@@ -400,8 +400,12 @@ export async function procesarConversacion(convId: number) {
   }
 
   // Guardar intención detectada
+  // REGLA: "Proforma generada" es permanente — una vez que se generó una proforma,
+  // ese es el evento más importante de la conversación y no debe sobreescribirse.
   const intencion = etiquetaIntencion(log, !!motivo, bloqueada);
-  await exec("UPDATE bot_conversaciones SET intencion=? WHERE id=?", [intencion, convId]);
+  if (conv.intencion !== 'Proforma generada') {
+    await exec("UPDATE bot_conversaciones SET intencion=? WHERE id=?", [intencion, convId]);
+  }
 
   await exec("INSERT INTO bot_trazas (conversacion_id, prompt, respuesta, tools_llamadas, bloqueada, tokens, latencia_ms) VALUES (?,?,?,?,?,?,?)", [
     convId, JSON.stringify({ system, contents }), JSON.stringify({ texto }), JSON.stringify(log), bloqueada ? 1 : 0, tokens, Date.now() - t0,
