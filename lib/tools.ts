@@ -110,16 +110,26 @@ export const declaraciones = [
   },
 ];
 
+// Palabras vacías del español que no aportan valor para búsqueda de productos
+const STOPWORDS = new Set([
+  "busco", "quiero", "necesito", "tengo", "tiene", "tienen", "para", "hijo",
+  "hija", "mis", "los", "las", "una", "uno", "unos", "unas", "con", "que",
+  "del", "como", "este", "esta", "ese", "esa", "por", "mas", "muy",
+  "favor", "porfavor", "hola", "buenas", "ver", "dame", "ayuda", "ayudar",
+  "puedes", "puede", "puedo", "gracias", "manda", "envia", "muestra",
+]);
+
 function palabras(t: string) {
   return t
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .split(/[^a-z0-9]+/)
-    .filter((w) => w.length >= 3)
+    .filter((w) => w.length >= 3 && !STOPWORDS.has(w))
     .map((w) => (w.length > 4 && w.endsWith("s") ? w.slice(0, -1) : w))
-    .slice(0, 4);
+    .slice(0, 6);
 }
+
 
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
@@ -362,10 +372,21 @@ export async function ejecutar(nombre: string, a: any, ctx: Ctx): Promise<any> {
         const asesorJid = `${asesorNum}@s.whatsapp.net`;
         const nombreCliente = String(a?.nombre_cliente ?? "Consumidor Final");
         const ciudadCliente = String(a?.ciudad ?? "");
-        const msg = `🛒 *Nueva proforma generada*\n\n👤 *Cliente:* ${nombreCliente}${ciudadCliente ? ` — ${ciudadCliente}` : ""}\n💰 *Total c/IVA:* $${totalConIva}\n📄 *PDF:* ${pdfUrl}\n\n📌 El cliente recibirá el PDF por WhatsApp. Esté atento por si desea proceder con la compra.`;
+        const msg = `🛒 *Nueva proforma generada — Paso a ventas*\n\n👤 *Cliente:* ${nombreCliente}${ciudadCliente ? ` — ${ciudadCliente}` : ""}\n💰 *Total c/IVA:* $${totalConIva}\n📄 *PDF:* ${pdfUrl}\n\n📌 El cliente recibió el PDF por WhatsApp. Comunícate para cerrar la venta.`;
         await enviarTexto(asesorJid, msg);
       } catch (err: any) {
         console.warn("[generar_cotizacion_pdf] No se pudo notificar a asesor:", err?.message);
+      }
+
+      // Registrar evento "paso_a_ventas" para el dashboard
+      try {
+        const nombreCliente = String(a?.nombre_cliente ?? "Consumidor Final");
+        await exec(
+          "INSERT INTO bot_eventos (conversacion_id, tipo, detalle) VALUES (?, 'paso_a_ventas', ?)",
+          [ctx.convId, JSON.stringify({ numero, total_con_iva: totalConIva, cliente: nombreCliente })]
+        );
+      } catch (err: any) {
+        console.warn("[generar_cotizacion_pdf] No se pudo registrar evento paso_a_ventas:", err?.message);
       }
 
       return {

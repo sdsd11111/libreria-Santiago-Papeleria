@@ -21,6 +21,18 @@ export async function GET() {
     WHERE nombre IS NOT NULL OR (datos IS NOT NULL AND datos != 'null' AND datos != '{}')
   `);
 
+  // Proformas generadas (cotizaciones PDF)
+  const [proformas] = await q<any>(`
+    SELECT COUNT(*) AS total FROM bot_conversaciones
+    WHERE intencion = 'Proforma generada'
+  `);
+
+  // Paso a ventas: eventos registrados cuando se genera una proforma
+  const [pasoVentas] = await q<any>(`
+    SELECT COUNT(*) AS total FROM bot_eventos
+    WHERE tipo = 'paso_a_ventas'
+  `);
+
   // Intenciones más frecuentes
   const intenciones = await q<any>(`
     SELECT intencion, COUNT(*) AS n
@@ -62,7 +74,13 @@ export async function GET() {
   `);
 
   return NextResponse.json({
-    stats: { ...stats, leads: leads?.total || 0, esperando: esperando?.n || 0 },
+    stats: {
+      ...stats,
+      leads: leads?.total || 0,
+      esperando: esperando?.n || 0,
+      proformas: proformas?.total || 0,
+      paso_ventas: pasoVentas?.total || 0,
+    },
     intenciones,
     porDia,
     porEmpresa,

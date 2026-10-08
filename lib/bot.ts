@@ -1,4 +1,4 @@
-﻿import { q, exec } from "./db";
+import { q, exec } from "./db";
 import { generar, textoDe, type Content } from "./gemini";
 import { declaraciones, ejecutar, type Ctx } from "./tools";
 import { ahora, asesoresDisponibles } from "./time";
@@ -7,18 +7,22 @@ import { enviarTexto, enviarImagen } from "./evolution";
 const ESCALAR_RE = /\b(asesor|humano|persona real|hablar con alguien|agente|queja|reclam|denuncia|estafa|reembols|devoluci)/i;
 const FALLBACK = "Prefiero confirmarlo con un asesor para no darte un dato incorrecto. Ya te paso con uno 🙏";
 
+// Palabras clave que indican que el usuario pide ver una foto/imagen
+const PIDE_FOTO_RE = /\b(foto|fotos|imagen|imag[ée]n|picture|pic|ver|mu[eé]str|mostrar|manda|env[ií]a|ense[ñn]|miro|catalogo visual|cat[aá]logo visual)\b/i;
+
 // Convierte los nombres de tools en una etiqueta legible de intención
 function etiquetaIntencion(log: { nombre: string }[], escalado: boolean, bloqueada: boolean): string {
-  if (escalado) return "Pasó a asesor";
+  if (escalado) return "Pasó a administración";
   if (bloqueada) return "Respuesta bloqueada";
   const nombres = [...new Set(log.map((l) => l.nombre))];
+  if (nombres.includes("generar_cotizacion_pdf")) return "Proforma generada";
   if (nombres.includes("buscar_producto")) return "Consulta de producto/precio";
   if (nombres.includes("buscar_sucursales")) return "Consulta de sucursal/horario";
   if (nombres.includes("listar_promociones")) return "Consulta de promociones";
   if (nombres.includes("buscar_conocimiento")) return "Consulta institucional/marcas";
   if (nombres.includes("buscar_faq")) return "Pregunta frecuente";
   if (nombres.includes("guardar_dato_cliente")) return "Captura de datos";
-  if (nombres.includes("escalar_a_humano") || nombres.includes("notificar_asesor")) return "Solicitó asesor";
+  if (nombres.includes("escalar_a_humano") || nombres.includes("notificar_asesor")) return "Pasó a administración";
   if (!nombres.length) return "Conversación general";
   return "Consulta general";
 }
@@ -351,24 +355,29 @@ export async function procesarConversacion(convId: number) {
   await responder(conv, texto, ids);
   await exec("UPDATE bot_conversaciones SET intentos_fallidos=?, estado=IF(?, estado, 'ATENDIENDO') WHERE id=?", [intentos, motivo ? 1 : 0, convId]);
 
-  // Enviar imágenes de categoría si la búsqueda encontró productos con imágenes
-  if (!bloqueada && !motivo) {
+  // Enviar imagen SOLO si el usuario pidió explícitamente ver fotos/imágenes
+  // Analiza todos los mensajes pendientes del cliente para detectar la intención visual
+  const usuarioPidioFoto = PIDE_FOTO_RE.test(textoEntrante);
+  if (!bloqueada && !motivo && usuarioPidioFoto) {
     try {
       const prodLogs = log.filter((l) => l.nombre === "buscar_producto" && l.resultado?.encontrado);
       const todasLasImgs = prodLogs
         .flatMap((l) => l.resultado?.productos || [])
         .map((p: any) => p.imagen_categoria)
         .filter(Boolean);
-      // Deduplicar por URL y enviar hasta 3 imágenes distintas (una por categoría)
+      // Deduplicar por URL — la primera es la de mayor score (ya ordenada por tools.ts)
       const imagenesUnicas: string[] = [];
       for (const img of todasLasImgs) {
         if (!imagenesUnicas.includes(img)) imagenesUnicas.push(img);
-        if (imagenesUnicas.length >= 3) break;
+        if (imagenesUnicas.length >= 2) break; // Máximo 2 cuando el usuario pide fotos
       }
       for (const imgUrl of imagenesUnicas) {
         await enviarImagen(conv.jid, imgUrl);
-        // Pequeña pausa entre imágenes para no saturar
         if (imagenesUnicas.length > 1) await new Promise(r => setTimeout(r, 600));
+      }
+      if (prodLogs.length > 0 && imagenesUnicas.length === 0) {
+        // Hay productos pero sin imagen en BD — avisar amablemente
+        await enviarTexto(conv.jid, "📷 Aún no contamos con imagen disponible para este producto en nuestro catálogo digital. Puede visitarnos en tienda para verlo personalmente.");
       }
     } catch (e: any) {
       console.warn("[Bot Imagen] No se pudo enviar imagen:", e?.message || e);

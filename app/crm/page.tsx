@@ -34,7 +34,7 @@ type CategoriaImg = {
   }[];
 };
 type Metricas = {
-  stats: { total_conversaciones: number; con_bot: number; escaladas: number; con_humano: number; hoy: number; leads: number; esperando: number };
+  stats: { total_conversaciones: number; con_bot: number; escaladas: number; con_humano: number; hoy: number; leads: number; esperando: number; proformas: number; paso_ventas: number };
   intenciones: { intencion: string; n: number }[];
   porDia: { dia: string; n: number; santiago_n?: number; escalados_n?: number }[];
   porEmpresa?: { empresa: string; intencion: string; n: number }[];
@@ -78,10 +78,11 @@ const INTENCION_COLOR: Record<string, string> = {
   "Consulta de sucursal/horario": "#0ea5e9",
   "Consulta de promociones": "#f59e0b",
   "Pregunta frecuente": "#8b5cf6",
-  "Pasó a asesor": "#ec4899",
-  "Captura de datos": "#10b981",
-  "Dato del cliente guardado": "#10b981",
-  "Solicitó asesor": "#f97316",
+  "Pasó a administración": "#ec4899",
+  "Proforma generada": "#10b981",
+  "Pasó a ventas": "#06b6d4",
+  "Captura de datos": "#6366f1",
+  "Dato del cliente guardado": "#6366f1",
   "Conversación general": "#64748b",
   "Respuesta bloqueada": "#ef4444",
 };
@@ -91,10 +92,11 @@ const INTENCION_ICONO: Record<string, string> = {
   "Consulta de sucursal/horario": "📍",
   "Consulta de promociones": "🎁",
   "Pregunta frecuente": "💡",
-  "Pasó a asesor": "👤",
+  "Pasó a administración": "👤",
+  "Proforma generada": "💰",
+  "Pasó a ventas": "🛒",
   "Captura de datos": "📝",
   "Dato del cliente guardado": "📝",
-  "Solicitó asesor": "🔔",
   "Conversación general": "💬",
 };
 
@@ -329,15 +331,13 @@ function Dashboard({ metricas }: { metricas: Metricas | null }) {
         </div>
       </div>
 
-      {/* 4 Top KPI Cards con Sparklines & Donut */}
-      <div className="kpi-glass-grid">
+      {/* 5 KPI Cards */}
+      <div className="kpi-glass-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
         <div className="kpi-card glass">
-          <div className="kpi-top">
-            <div className="kpi-meta">
-              <span className="kpi-title">Total Interacciones</span>
-              <span className="kpi-badge positive">+18% sem</span>
-            </div>
-          </div>
+          <div className="kpi-top"><div className="kpi-meta">
+            <span className="kpi-title">Total Interacciones</span>
+            <span className="kpi-badge positive">+18% sem</span>
+          </div></div>
           <div className="kpi-bottom">
             <div className="kpi-number">{stats.total_conversaciones}</div>
             <Sparkline data={sparkTotal} color="#3b82f6" />
@@ -345,12 +345,10 @@ function Dashboard({ metricas }: { metricas: Metricas | null }) {
         </div>
 
         <div className="kpi-card glass">
-          <div className="kpi-top">
-            <div className="kpi-meta">
-              <span className="kpi-title">Leads Registrados</span>
-              <span className="kpi-badge emerald">{tasaLeads}% ratio</span>
-            </div>
-          </div>
+          <div className="kpi-top"><div className="kpi-meta">
+            <span className="kpi-title">Leads Registrados</span>
+            <span className="kpi-badge emerald">{tasaLeads}% ratio</span>
+          </div></div>
           <div className="kpi-bottom">
             <div className="kpi-number">{stats.leads}</div>
             <Sparkline data={sparkLeads} color="#10b981" />
@@ -358,28 +356,50 @@ function Dashboard({ metricas }: { metricas: Metricas | null }) {
         </div>
 
         <div className="kpi-card glass">
-          <div className="kpi-top">
-            <div className="kpi-meta">
-              <span className="kpi-title">Resolución Autónoma</span>
-              <span className="kpi-badge purple">{tasaResolucion}% bot</span>
-            </div>
-          </div>
+          <div className="kpi-top"><div className="kpi-meta">
+            <span className="kpi-title">Resolución Autónoma</span>
+            <span className="kpi-badge purple">{tasaResolucion}% bot</span>
+          </div></div>
           <div className="kpi-bottom">
             <div className="kpi-number">{tasaResolucion}%</div>
             <CircularDonut percent={tasaResolucion} color="#8b5cf6" size={54} stroke={6} />
           </div>
         </div>
 
-        <div className="kpi-card glass">
-          <div className="kpi-top">
-            <div className="kpi-meta">
-              <span className="kpi-title">Pasaron a Asesor</span>
-              <span className="kpi-badge amber">{tasaEscalado}% ratio</span>
-            </div>
-          </div>
+        <div className="kpi-card glass" style={{ borderTop: "2px solid #ec489940" }}>
+          <div className="kpi-top"><div className="kpi-meta">
+            <span className="kpi-title">Pasó a Administración</span>
+            <span className="kpi-badge amber">{tasaEscalado}% ratio</span>
+          </div></div>
           <div className="kpi-bottom">
             <div className="kpi-number">{totalEscalados}</div>
-            <Sparkline data={sparkEscalados} color="#f59e0b" />
+            <Sparkline data={sparkEscalados} color="#ec4899" />
+          </div>
+        </div>
+
+        <div className="kpi-card glass" style={{ borderTop: "2px solid #10b98140" }}>
+          <div className="kpi-top"><div className="kpi-meta">
+            <span className="kpi-title">Proformas Generadas</span>
+            <span className="kpi-badge emerald">💰 ventas</span>
+          </div></div>
+          <div className="kpi-bottom">
+            <div className="kpi-number" style={{ color: "#10b981" }}>{stats.proformas ?? 0}</div>
+            <CircularDonut
+              percent={Math.min(100, Math.round(((stats.proformas ?? 0) / Math.max(1, stats.total_conversaciones)) * 100))}
+              color="#10b981" size={54} stroke={6}
+              label={`${Math.min(100, Math.round(((stats.proformas ?? 0) / Math.max(1, stats.total_conversaciones)) * 100))}%`}
+            />
+          </div>
+        </div>
+
+        <div className="kpi-card glass" style={{ borderTop: "2px solid #06b6d440" }}>
+          <div className="kpi-top"><div className="kpi-meta">
+            <span className="kpi-title">Pasó a Ventas</span>
+            <span className="kpi-badge" style={{ background: "rgba(6,182,212,0.12)", color: "#06b6d4", border: "1px solid rgba(6,182,212,0.3)" }}>🛒 notificado</span>
+          </div></div>
+          <div className="kpi-bottom">
+            <div className="kpi-number" style={{ color: "#06b6d4" }}>{stats.paso_ventas ?? 0}</div>
+            <Sparkline data={sparkEscalados.map((v: number) => Math.max(0, v - 1))} color="#06b6d4" />
           </div>
         </div>
       </div>
