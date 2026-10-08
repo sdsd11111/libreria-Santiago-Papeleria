@@ -1,4 +1,4 @@
-import { q, exec } from "./db";
+﻿import { q, exec } from "./db";
 import { generar, textoDe, type Content } from "./gemini";
 import { declaraciones, ejecutar, type Ctx } from "./tools";
 import { ahora, asesoresDisponibles } from "./time";
@@ -109,6 +109,11 @@ Cuando el cliente pregunte por ubicación, dirección, horario, precio o promoci
 - Para preguntas de precio o disponibilidad de UN producto: llame buscar_producto() y responda.
 - Los precios en el catálogo son sin IVA. Informe siempre que el precio mostrado es + IVA (15%).
 - Stock exacto en tienda física: no lo garantice; invite a confirmar con un asesor o llamando.
+
+══ FOTOS E IMÁGENES ══
+- El bot SÍ puede enviar fotos de categoría de productos. Si el cliente pide ver una foto o imagen de algún producto, llame buscar_producto() y el sistema enviará automáticamente la imagen disponible.
+- NUNCA diga que no puede enviar fotos o imágenes. Si no hay imagen disponible para ese producto, indíquelo amablemente.
+- Si el cliente pide ver catálogo visual o fotos de una categoría (ej. cuadernos, pinturas), llame buscar_producto() con ese término y el sistema adjuntará la imagen.
 
 ══ CÓMO MANEJAR LISTAS Y COTIZACIONES (REGLA CRÍTICA) ══
 Cuando el cliente envíe una lista de útiles, materiales u otros productos:
@@ -346,16 +351,24 @@ export async function procesarConversacion(convId: number) {
   await responder(conv, texto, ids);
   await exec("UPDATE bot_conversaciones SET intentos_fallidos=?, estado=IF(?, estado, 'ATENDIENDO') WHERE id=?", [intentos, motivo ? 1 : 0, convId]);
 
-  // Si la búsqueda devolvió una categoría con imagen configurada en Bunny CDN, enviar la imagen
+  // Enviar imágenes de categoría si la búsqueda encontró productos con imágenes
   if (!bloqueada && !motivo) {
     try {
       const prodLogs = log.filter((l) => l.nombre === "buscar_producto" && l.resultado?.encontrado);
-      const primeraImg = prodLogs
+      const todasLasImgs = prodLogs
         .flatMap((l) => l.resultado?.productos || [])
         .map((p: any) => p.imagen_categoria)
-        .find((img: any) => Boolean(img));
-      if (primeraImg) {
-        await enviarImagen(conv.jid, primeraImg);
+        .filter(Boolean);
+      // Deduplicar por URL y enviar hasta 3 imágenes distintas (una por categoría)
+      const imagenesUnicas: string[] = [];
+      for (const img of todasLasImgs) {
+        if (!imagenesUnicas.includes(img)) imagenesUnicas.push(img);
+        if (imagenesUnicas.length >= 3) break;
+      }
+      for (const imgUrl of imagenesUnicas) {
+        await enviarImagen(conv.jid, imgUrl);
+        // Pequeña pausa entre imágenes para no saturar
+        if (imagenesUnicas.length > 1) await new Promise(r => setTimeout(r, 600));
       }
     } catch (e: any) {
       console.warn("[Bot Imagen] No se pudo enviar imagen:", e?.message || e);
