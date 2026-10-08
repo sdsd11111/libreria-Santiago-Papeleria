@@ -170,6 +170,10 @@ export async function ejecutar(nombre: string, a: any, ctx: Ctx): Promise<any> {
       if (emp) { f = "AND p.empresa IN (?, 'ambas')"; p.push(emp); }
       const cond = ws.map(() => "(p.nombre LIKE ? OR p.categoria LIKE ? OR p.descripcion LIKE ?)").join(" OR ");
       ws.forEach((w) => p.push(`%${w}%`, `%${w}%`, `%${w}%`));
+
+      // La subquery de foto_especifica necesita sus propios parámetros ANTES de los de la query principal
+      const etiqParams = ws.map((w) => `%${w}%`);
+
       const rows = await q<any>(
         `SELECT p.id AS producto_id, p.empresa, p.nombre, p.descripcion, p.categoria, p.precio, p.stock,
                 c.url_imagen AS cat_imagen,
@@ -181,19 +185,61 @@ export async function ejecutar(nombre: string, a: any, ctx: Ctx): Promise<any> {
          LEFT JOIN bot_categorias_img c ON c.categoria = p.categoria
          WHERE p.activo=1 ${f} AND (${cond})
          LIMIT 30`,
-        [...ws.map((w) => `%${w}%`), ...p]
+        [...etiqParams, ...p]
       );
-      const top = puntuar(rows, ws, ["nombre", "categoria", "descripcion"], 5).map((r) => ({
-        nombre: r.nombre,
-        descripcion: r.descripcion,
-        categoria: r.categoria,
-        precio: r.precio,
-        disponible: r.stock > 0,
-        imagen_especifica: r.foto_especifica || null,
-        imagen_categoria: r.foto_especifica || r.cat_imagen || null,
-      }));
+
+      const topRows = puntuar(rows, ws, ["nombre", "categoria", "descripcion"], 5);
+
+      // Para cada producto encontrado, buscar la imagen de galería que MÁS etiquetas comparte
+      // con las palabras de búsqueda (matching inteligente entre N fotos etiquetadas)
+      const categorias = [...new Set(topRows.map((r: any) => r.categoria as string))];
+      let galeriaMap: Record<string, { url: string; score: number }[]> = {};
+
+      if (categorias.length > 0) {
+        const placeholders = categorias.map(() => "?").join(",");
+        const galeriaRows = await q<any>(
+          `SELECT categoria, url_imagen, etiquetas, producto_id
+           FROM bot_categorias_galeria
+           WHERE categoria IN (${placeholders})
+           ORDER BY id ASC`,
+          categorias
+        );
+
+        for (const g of galeriaRows) {
+          if (!galeriaMap[g.categoria]) galeriaMap[g.categoria] = [];
+          const etiqs = norm(String(g.etiquetas || ""));
+          // Puntaje: cuántas palabras de búsqueda aparecen en las etiquetas
+          const score = ws.reduce((acc, w) => acc + (etiqs.includes(w) ? 2 : 0), 0)
+            + (g.producto_id ? 1 : 0); // bonus si está vinculada a un producto específico
+          galeriaMap[g.categoria].push({ url: g.url_imagen, score });
+        }
+
+        // Ordenar por score desc para cada categoría
+        for (const cat of Object.keys(galeriaMap)) {
+          galeriaMap[cat].sort((a, b) => b.score - a.score);
+        }
+      }
+
+      const top = topRows.map((r: any) => {
+        // Usar foto específica del producto primero, luego mejor match de galería por etiquetas
+        const mejorGaleria = galeriaMap[r.categoria]?.[0];
+        const fotoGaleria = mejorGaleria && mejorGaleria.score > 0
+          ? mejorGaleria.url
+          : (galeriaMap[r.categoria]?.[0]?.url ?? null); // fallback: primera foto de la categoría
+        const imagenFinal = r.foto_especifica || fotoGaleria || r.cat_imagen || null;
+        return {
+          nombre: r.nombre,
+          descripcion: r.descripcion,
+          categoria: r.categoria,
+          precio: r.precio,
+          disponible: r.stock > 0,
+          imagen_especifica: r.foto_especifica || null,
+          imagen_categoria: imagenFinal,
+        };
+      });
       return top.length ? { encontrado: true, productos: top } : { encontrado: false };
     }
+
 
     if (nombre === "buscar_conocimiento") {
       const tema = String(a?.tema ?? "").toLowerCase().replace(/[^a-z_]/g, "");
