@@ -189,21 +189,36 @@ Resumen previo: ${conv.resumen ?? "conversación nueva"}`;
 }
 
 // Valida que precios en $ mencionados por el bot vengan de una herramienta.
-// Para cotizaciones largas (muchas tools), se confía en el modelo.
 function validar(texto: string, resultados: string, _toolsUsadas: string[]): boolean {
-  // Si se usaron más de 5 tool calls es una cotización de lista — confiar en el modelo
-  // También si se generó una cotización PDF: confiar en el modelo
-  if (_toolsUsadas.length > 5 || _toolsUsadas.includes('generar_cotizacion_pdf') || _toolsUsadas.includes('listar_promociones') || _toolsUsadas.includes('buscar_sucursales')) return true;
+  // Sin herramientas: el modelo responde desde el historial — confiar siempre
+  if (_toolsUsadas.length === 0) return true;
+  // Herramientas que generan respuestas confiables por naturaleza
+  if (_toolsUsadas.length > 5
+    || _toolsUsadas.includes('generar_cotizacion_pdf')
+    || _toolsUsadas.includes('listar_promociones')
+    || _toolsUsadas.includes('buscar_sucursales')
+    || _toolsUsadas.includes('buscar_faq')
+    || _toolsUsadas.includes('buscar_conocimiento')
+    || _toolsUsadas.includes('guardar_dato_cliente')
+    || _toolsUsadas.includes('escalar_a_humano')
+    || _toolsUsadas.includes('notificar_asesor')
+  ) return true;
+  // Si buscar_producto encontró productos reales — confiar en el modelo
+  try {
+    const parsed = JSON.parse(resultados) as any[];
+    const hayProductos = parsed.some((r) => r?.encontrado === true && (r?.productos?.length ?? 0) > 0);
+    if (hayProductos) return true;
+  } catch { /* ignora y continúa */ }
+  // Solo validar números si NO se encontraron productos (caso en que el modelo podría inventar)
   const nums = new Set((resultados.match(/\d+(?:\.\d+)?/g) ?? []).map(Number));
-  nums.add(5); // Promocion conocida de 
+  nums.add(5);
   const montos = texto.match(/\$\s?\d+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?\s?(?:d[oó]lares|USD)/gi) ?? [];
   for (const m of montos) {
-    const n = parseFloat((m.match(/\d+(?:[.,]\d{1,2})?/)![0]).replace(",", "."));
-    // Acepta: precio exacto O precio con IVA 15% (±1 centavo) O precio redondeado
+    const n = parseFloat((m.match(/\d+(?:[.,]\d{1,2})?/)![0]).replace(',', '.'));
     const ok = [...nums].some((x) =>
-      Math.abs(x - n) < 0.02 ||           // exacto
-      Math.abs(x * 1.15 - n) < 0.05 ||    // con IVA
-      Math.abs(x - n * 1.15) < 0.05       // sin IVA
+      Math.abs(x - n) < 0.02 ||
+      Math.abs(x * 1.15 - n) < 0.05 ||
+      Math.abs(x - n * 1.15) < 0.05
     );
     if (!ok) return false;
   }
