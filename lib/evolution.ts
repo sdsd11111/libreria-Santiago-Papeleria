@@ -19,20 +19,34 @@ export async function enviarTexto(jid: string, texto: string) {
 export async function enviarImagen(jid: string, mediaUrl: string, caption?: string) {
   if (jid.startsWith("sim-")) return;
   try {
+    // Evolution API v2: mediatype, media, caption van en el nivel raíz del body
     const r = await fetch(`${process.env.EVOLUTION_URL}/message/sendMedia/${process.env.EVOLUTION_INSTANCE}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", apikey: process.env.EVOLUTION_API_KEY! },
       body: JSON.stringify({
         number: jid,
-        mediaMessage: {
-          mediatype: "image",
-          media: mediaUrl,
-          caption: caption || "",
-        },
+        mediatype: "image",
+        media: mediaUrl,
+        caption: caption || "",
       }),
     });
     if (!r.ok) {
-      console.warn(`[Evolution Media Warning] ${r.status}: ${await r.text()}`);
+      const errText = await r.text();
+      console.warn(`[Evolution Media Warning] ${r.status}: ${errText}`);
+      // Fallback: intentar con wrapper mediaMessage (versiones antiguas de Evolution)
+      const r2 = await fetch(`${process.env.EVOLUTION_URL}/message/sendMedia/${process.env.EVOLUTION_INSTANCE}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: process.env.EVOLUTION_API_KEY! },
+        body: JSON.stringify({
+          number: jid,
+          mediaMessage: {
+            mediatype: "image",
+            media: mediaUrl,
+            caption: caption || "",
+          },
+        }),
+      });
+      if (!r2.ok) console.warn(`[Evolution Media Fallback] ${r2.status}: ${await r2.text()}`);
     }
   } catch (err: any) {
     console.warn(`[Evolution Error] No se pudo enviar imagen a ${jid}:`, err?.message || err);
