@@ -78,7 +78,9 @@ BIC, Faber-Castell, Pelikan, Artesco, Maped, Stabilo, Staedtler, Rotring, Lancer
 - ¿Formas de pago? → Efectivo, tarjetas (Visa, Mastercard, American Express, Diners, Discover, Alia) sin recargo, y transferencias bancarias.
 - ¿Cuántos años tienen? → Más de 40 años desde 1980.
 - ¿Devoluciones? → Dentro de 5 días después de la compra. Contactar servicios@santiagopapeleria.com.
-- ¿Redes sociales? → Instagram: @santiagopapeleria y @megasantiago_loja | Facebook: Santiago Papelaría | TikTok: @santiagopapeleria.
+- ¿Redes sociales / Dónde publican promociones? → En Instagram: @santiagopapeleria y @megasantiago_loja, Facebook y TikTok.
+- ¿Autoservicio? → Primer autoservicio de papelería en Loja (desde 2018), ofrece comodidad, variedad y rapidez para escoger directamente en tienda.
+- ¿Premios y sorteos? → Campañas activas en redes sociales y la promoción de los martes y sábados MAPED con premios instantáneos por compras desde .
 - ¿Página web? → www.santiagopapeleria.com
 - ¿Empleo? → Enviar hoja de vida a administracionsantiago@santiagopapeleria.com o en tiendas físicas.
 - ¿Reclamo? → Recoger datos del cliente y pasar a asesor (César). Correo: servicios@santiagopapeleria.com.
@@ -182,8 +184,9 @@ Resumen previo: ${conv.resumen ?? "conversación nueva"}`;
 function validar(texto: string, resultados: string, _toolsUsadas: string[]): boolean {
   // Si se usaron más de 5 tool calls es una cotización de lista — confiar en el modelo
   // También si se generó una cotización PDF: confiar en el modelo
-  if (_toolsUsadas.length > 5 || _toolsUsadas.includes("generar_cotizacion_pdf")) return true;
+  if (_toolsUsadas.length > 5 || _toolsUsadas.includes('generar_cotizacion_pdf') || _toolsUsadas.includes('listar_promociones') || _toolsUsadas.includes('buscar_sucursales')) return true;
   const nums = new Set((resultados.match(/\d+(?:\.\d+)?/g) ?? []).map(Number));
+  nums.add(5); // Promocion conocida de 
   const montos = texto.match(/\$\s?\d+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?\s?(?:d[oó]lares|USD)/gi) ?? [];
   for (const m of montos) {
     const n = parseFloat((m.match(/\d+(?:[.,]\d{1,2})?/)![0]).replace(",", "."));

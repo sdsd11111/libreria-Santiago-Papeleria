@@ -128,10 +128,48 @@ export async function generar(body: Record<string, any>) {
             usageMetadata: { totalTokenCount: data.usage?.total_tokens ?? 0 },
           };
         }
+        // Si DeepSeek incluyó tool calls formateados en content (ej. DSML o etiquetas especiales)
+        if (!msg?.tool_calls?.length && msg?.content && msg.content.includes("invoke name=")) {
+          const regex = /<[|｜]{2}DSML[|｜]{2} invoke name="([^"]+)">([\s\S]*?)<\/[|｜]{2}DSML[|｜]{2} invoke>/g;
+          const paramRegex = /<[|｜]{2}DSML[|｜]{2} parameter name="([^"]+)"[^>]*>([\s\S]*?)<\/[|｜]{2}DSML[|｜]{2} parameter>/g;
+          const parsedCalls: any[] = [];
+          let match;
+          while ((match = regex.exec(msg.content)) !== null) {
+            const funcName = match[1];
+            const paramBlock = match[2];
+            const args: Record<string, any> = {};
+            let pMatch;
+            while ((pMatch = paramRegex.exec(paramBlock)) !== null) {
+              const pName = pMatch[1];
+              let pVal: any = pMatch[2].trim();
+              try { pVal = JSON.parse(pVal); } catch {}
+              args[pName] = pVal;
+            }
+            parsedCalls.push({
+              functionCall: { name: funcName, args },
+            });
+          }
+          if (parsedCalls.length > 0) {
+            return {
+              candidates: [
+                {
+                  content: { role: "model", parts: parsedCalls },
+                  finishReason: "STOP",
+                },
+              ],
+              usageMetadata: { totalTokenCount: data.usage?.total_tokens ?? 0 },
+            };
+          }
+        }
+
+        // Si el contenido traía etiquetas DSML pero sin texto útil, limpiarlas
+        let cleanText = msg?.content || "";
+        cleanText = cleanText.replace(/<[|｜]{2}DSML[|｜]{2}[\s\S]*?<\/[|｜]{2}DSML[|｜]{2} calls>/g, "").trim();
+
         return {
           candidates: [
             {
-              content: { parts: [{ text: msg?.content || "" }], role: "model" },
+              content: { parts: [{ text: cleanText }], role: "model" },
               finishReason: "STOP",
             },
           ],
